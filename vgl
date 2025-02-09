@@ -10,9 +10,7 @@ export MESA_GLES_VERSION_OVERRIDE=3.1
 export MESA_LOADER_DRIVER_OVERRIDE=
 # export LIBGL_DRI3_DISABLE=1
 # disable dri3 alternative
-export LIBGL_ALWAYS_SOFTWARE=1
 # use virpipe
-export GALLIUM_DRIVER=virpipe
 export MESA_NO_ERROR=1
 # back buffer type Pixmap or XImage (for x11 legacy drawing mode)
 export MESA_BACK_BUFFER=pixmap
@@ -28,33 +26,46 @@ else
     # export VREND_TWEAK=bgra-dest-swz
 fi
 
+for a in $@; do
+    case $a in
+        -Q) set -x;;
+    esac
+done
+
+if test "$1" = "-Q"; then shift; fi
+
 vhelp() {
    echo
    echo "Use 'vgl i' to install virgl android"
+   echo "Use 'vgl option' from use-android use-angle config=gl  config=d3d"
    echo "and use 'vgl target_app' to launch specific app"
    echo "or 'vgl q' to kill virgl_test server"
+   echo or 'vgl -Q ...' for loud output for all of the above '(set -x)'
    echo
 }
 
 killvirgl() {
     if [[ $(pgrep -f "virgl") != "" ]]; then
-        kill -9 $(pgrep -f "virgl_test_server_android") 2>/dev/null
+        kill -9 $(pgrep -f $VGL) 2>/dev/null
         kill -9 $(pgrep -f "virgl_test_server") 2>/dev/null
         kill -9 $(pgrep -f "virgl") 2>/dev/null
         echo "virgl server killed."
+    else
+        echo "not running"
     fi
 }
 
+have_angle() {
+    test "$VGL" = "" && echo could not find server rerun command with -Q for loud output && exit
+}
 
-start_vgl() {
-    if [ -f ~/.vgl-angle-gl ]; then
-        ANGLE_MODE=gl
-    elif [ -f ~/.vgl-angle-vulkan ]; then
-        ANGLE_MODE=vulkan
-    else
-        ANGLE_MODE=vulkan-null
-    fi
+which_angle() {
+    # the old horrible name 
+    which virgl_test_server_android > /dev/null 2>&1 && VGL=virgl_test_server_android
+    which virgl-angle > /dev/null 2>&1 && VGL=virgl-angle
+}
 
+symlink() {
     if [ ! -f /data/data/com.termux/files/usr/opt/angle-android/${ANGLE_MODE}/libEGL.so.1 ]; then
         ln -s /data/data/com.termux/files/usr/opt/angle-android/${ANGLE_MODE}/libEGL_angle.so /data/data/com.termux/files/usr/opt/angle-android/${ANGLE_MODE}/libEGL.so.1
     fi
@@ -66,13 +77,26 @@ start_vgl() {
     if [ ! -f /data/data/com.termux/files/usr/opt/angle-android/${ANGLE_MODE}/libGLESv2.so.2 ]; then
         ln -s /data/data/com.termux/files/usr/opt/angle-android/${ANGLE_MODE}/libGLESv2_angle.so /data/data/com.termux/files/usr/opt/angle-android/${ANGLE_MODE}/libGLESv2.so.2
     fi
+}
+
+start_vgl() {
+    if [ -f ~/.vgl-angle-gl ]; then
+        ANGLE_MODE=gl
+    elif [ -f ~/.vgl-angle-vulkan ]; then
+        ANGLE_MODE=vulkan
+    else
+        ANGLE_MODE=vulkan-null
+    fi
+
+    symlink
 
     if [[ $(pgrep -f 'virgl_test') == "" && ! -f ~/.vgl-android ]]; then
         # export MESA_VK_WSI_PRESENT_MODE=fifo        
         LD_LIBRARY_PATH=/data/data/com.termux/files/usr/opt/angle-android/${ANGLE_MODE} virgl_test_server --use-egl-surfaceless --use-gles &
         sleep 1
     elif [[ $(pgrep -f 'virgl_test') == "" && -f ~/.vgl-android ]]; then
-        virgl_test_server_android &
+        have_angle
+        $VGL &
         sleep 1
     fi
 
@@ -85,7 +109,7 @@ start_vgl() {
             echo "using virgl angle=vulkan-null."
         fi
     elif [ -f ~/.vgl-android ]; then
-       echo "using virgl android."
+       echo "using $VGL"
     fi
 
     if [ ! -f ~/.vgl-d3d ]; then
@@ -93,7 +117,9 @@ start_vgl() {
     else
         echo "with d3d (Direct 3D) config."
     fi
-}
+} # start_vgl
+
+which_angle
 
 if [[ "$1" == "angle=vulkan" ]]; then
     killvirgl
@@ -119,6 +145,7 @@ elif [[ "$1" == "angle=gl" ]]; then
     touch ~/.vgl-angle-gl
     start_vgl
 elif [[ "$1" == "use-android" ]]; then
+    have_angle
     killvirgl
     touch ~/.vgl-android
     start_vgl
@@ -154,7 +181,8 @@ elif [[ "$1" == "i" ]]; then
     echo "done."
 elif [[ $@ ]]; then
     start_vgl
-    "$@"
+    LIBGL_ALWAYS_SOFTWARE=1 GALLIUM_DRIVER=virpipe "$@"
+    killvirgl
 else
     vhelp
 fi
